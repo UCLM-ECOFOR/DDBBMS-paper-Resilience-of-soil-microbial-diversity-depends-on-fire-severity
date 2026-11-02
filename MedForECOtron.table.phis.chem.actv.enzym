@@ -1,0 +1,70 @@
+# Data files required (place in working directory):
+#   Fisico-quimicos_R.xlsx
+# =============================================================================
+
+# ── 0. PACKAGES ───────────────────────────────────────────────────────────────
+pkgs <- c(
+  "readxl", "dplyr", "tidyr", "tibble", "stringr", "purrr",
+  "ggplot2", "patchwork", "ggbeeswarm", "ggpubr",
+  "car", "FSA", "rstatix", "effectsize", "outliers",
+  "lme4", "lmerTest", "emmeans", "performance",
+  "FactoMineR", "factoextra",
+  "corrplot", "RColorBrewer"
+)
+new_pkgs <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
+if (length(new_pkgs)) install.packages(new_pkgs, dependencies = TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(scipen = 6, digits = 4)
+set.seed(2024)
+
+## 1b. Soil physico-chemical data ----------------------------------------------
+soil_raw <- Fisico_quimicos_R
+
+# Rename all columns by position
+names(soil_raw) <- c(
+  "date", "treatment", "time",
+  "sand", "silt", "clay",
+  "pH", "EC",    # EC = electrical conductivity (CE1:5)
+  "OM", "N",     # organic matter, total nitrogen
+  "CN",          # C:N ratio
+  "NO3",         # mineral nitrogen (NaN at 1y)
+  "P", "K", "Na", "Ca", "Mg",
+  "K_Mg", "Ca_Mg",
+  "C", "CEC"     # carbon, cation exchange capacity
+)
+
+soil <- soil_raw %>%
+  mutate(
+    treatment = str_trim(treatment),
+    time      = str_trim(time),
+    treatment = factor(treatment,
+                       levels = c("UB", "LOW", "HIGH"),
+                       labels = c("Control", "Low severity", "High severity")),
+    time = factor(time,
+                  levels = c("PRE", "POST", "1 y after"),
+                  labels = c("Pre-fire", "Post-fire", "One year after"))
+  ) %>%
+  # Assign replicate ID (rep 1 or 2) within each treatment × time combination
+  # This tracks the same lysimeter across time points
+  group_by(treatment, time) %>%
+  mutate(rep = row_number(),
+         unit_id = paste(treatment, rep, sep = "_rep")) %>%
+  ungroup()
+
+cat("\nSoil data — observations per time × treatment:\n")
+print(table(soil$treatment, soil$time))
+cat("NOTE: n = 2 replicates per cell — LMM power is limited; results are indicative.\n")
+
+## Table 1 (Main text): Soil properties by treatment at each time point -------
+tbl2 <- soil %>%
+  select(treatment, time, all_of(key_soil)) %>%
+  pivot_longer(all_of(key_soil), names_to = "variable", values_to = "value") %>%
+  group_by(variable, treatment, time) %>%
+  summarise(
+    mean_se = sprintf("%.3f \u00b1 %.3f",
+                      mean(value, na.rm=TRUE),
+                      sd(value, na.rm=TRUE)/sqrt(n())),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(names_from = c(treatment, time), values_from = mean_se)
